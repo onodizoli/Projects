@@ -1,10 +1,3 @@
-#!/usr/bin/env python2
-# -*- coding: utf-8 -*-
-"""
-Created on Wed Mar 15 14:23:29 2017
-
-@author: zoltan
-"""
 
 import pandas as pd
 import numpy as np
@@ -27,7 +20,27 @@ def parseInterest(interest):
         return interest
             
 class EmpBayesCluster(BaseEstimator, TransformerMixin):
-    def __init__(self, key = 'manager_id', tgts = ['low', 'medium', 'high'], outcome_var='interest_level', means = None, group_miss = True, exclude_top = False, group_singles=False):
+    '''
+    Class for encoding high cardinality categorical data, implementing
+    the paper: 
+    http://helios.mm.di.uoa.gr/~rouvas/ssi/sigkdd/sigkdd.vol3.1/barreca.ps
+    It can be used in scikit-learn pipelines
+    '''    
+    
+    def __init__(self, key = 'manager_id', tgts = ['low', 'medium', 'high'], 
+                 outcome_var='interest_level', means = None, 
+                 exclude_top = False):
+        '''
+        Arguments:
+        ----------    
+        key: categorical variable to encode
+        tgts: states of outcome variable
+        outcome_var: outcome variable of the model
+        means: prior distibution of outcome variable, if None, the given dataset
+                is used to compute
+        exclude_top: if True, the prior is computed by excluding keys with 
+                high frequency        
+        '''
 
         self.outcome_var = outcome_var
         
@@ -38,23 +51,28 @@ class EmpBayesCluster(BaseEstimator, TransformerMixin):
         self.means_dir = {i: 0 for i in self.tgts}
         
         if means != None:
-            self.means_dir = means            
+            self.means_dir = means      
         
-        self.group_miss = group_miss
         self.exclude_top = exclude_top
-        self.group_singles = group_singles
+
            
     def fit(self, df, k = 12.0, f = 0.5):
         '''
-        This follows paper _:
-    
-        k: # of examples needed for an even split between means
-        f: transition rate
+        Fitting the encoder on the data, calculating the values which should be
+            assigned to each instance of the category
+        ---------- 
+        
+        Arguments:
+        ----------
+        df: dataset    
+        k: parameter of weighing function, # of examples needed for an even 
+            split between prior and empiric distribution
+        f: parameter of weighing function, controlling transition rate
         '''
         
         key_vc = df[self.key].value_counts()
         
-        if self.means == None:
+        if  self.means == None:
             self.means = df[self.outcome_var].value_counts()
             self.means /= float(len(df))
                
@@ -64,11 +82,12 @@ class EmpBayesCluster(BaseEstimator, TransformerMixin):
         
             if self.exclude_top:
                 ids = pd.Series(key_vc[key_vc < (k-1)].index).rename('ids')
-                if not self.group_miss:
-                    ids = ids.append(pd.Series('0', index=[len(ids)])).rename('ids')
                 ids = ids.to_frame()
                 ids['dummy']=True
-                filtered = pd.merge(left = df[[self.key,self.outcome_var]], right = ids, how = 'left', left_on = self.key, right_on = ids.ids).dropna()
+                filtered = pd.merge(left = df[[self.key,self.outcome_var]],
+                                    right = ids, how = 'left',
+                                    left_on = self.key,
+                                    right_on = ids.ids).dropna()
                 self.means = filtered[self.outcome_var].value_counts()
                 self.means /= float(len(filtered))
                 for i in self.means.index:
@@ -89,9 +108,6 @@ class EmpBayesCluster(BaseEstimator, TransformerMixin):
         for i in self.tgts:            
             self.value_table[self.key + '_' + i] = 0.0
 
-    
-        if not self.group_miss:
-            self.value_table = self.value_table.drop('0')
         
 
         for i in self.value_table.index:
@@ -115,40 +131,40 @@ class EmpBayesCluster(BaseEstimator, TransformerMixin):
 
         return self
     
-    def transform(self, df, tgts = ['medium', 'high'], r_k=0.01, noise = False, seed=1990):
+    def transform(self, df, tgts = ['medium', 'high'], r_k=0.01, 
+                  noise = False):
         '''
-        Encode the dataset with the weighted averages
+        Return the dataset with the new encoded features
+        ----------
         
+        Arguments:
+        ----------    
         df: dataset
-        tgts: values pf the poutvome var you want to encode, typically len(outcome_var)-1
+        tgts: values of the outcome variable you want to encode,
+            typically len(outcome_var)-1
+        noise: if True, uniform noise is added to output for more robustness
+        r_k: controls the noise
         '''
         
         
         tgts_rename = [self.key + '_' + i for i in tgts]
-        df = pd.merge(left = df, right = self.value_table[tgts_rename], how = 'left', left_on = self.key, right_index = True)
+        df = pd.merge(left = df, right = self.value_table[tgts_rename],
+                      how = 'left', left_on = self.key, right_index = True)
         for i in tgts_rename:
             if self.group_singles:
                 df[i].fillna(self.value_table.loc['0'][i], inplace = True)
             else:
                 df[i].fillna(self.means_dir[i.split('_')[-1]], inplace = True)
             if noise:
-                df[i] = df[i].apply(lambda row: row *(1 + (np.random.uniform() - 0.5) * r_k))        
+                df[i] = df[i].apply(lambda row:
+                    row *(1 + (np.random.uniform() - 0.5) * r_k))        
         return df
         
 class Preprocessor(BaseEstimator, TransformerMixin):
     """
-    Preprocessing the dataset and creating features. The function should
-    be usable in scikit-learn pipelines.
-    
+    Preprocessing the dataset and creating features. The function is
+    usable in scikit-learn pipelines.
 
-    Attributes
-    ----------
-    mapping : pandas dataframe
-        contains the manager_skill per manager id.
-        
-    mean_skill : float
-        The mean skill of managers with at least as many listings as the 
-        threshold.
     """
     
     def __init__(self):
@@ -165,29 +181,33 @@ class Preprocessor(BaseEstimator, TransformerMixin):
             return 2
         
     def fit(self, df, features = ['manager_id', 'building_id']):
-        """ Get categorical features with a single occurance
+        """ 
+        Get categorical features with a single occurance for encoding them 
+        with -1 in the future
         
-        Parameters
+        Arguments
         ----------
-        df : pandas dataframe, the rental data. 
+        df: dataset 
             
-        features : list of categorical features
+        features: list of categorical features
         """
 
         for feature in features:
-            temp = df.groupby(feature, as_index = True).count()['bathrooms'].rename('count')
+            temp = (df.groupby(feature, as_index = True)
+                    .count()['bathrooms'].rename('count'))
             table = temp[temp == 1]
             self.categorical_features[feature] = table         
                 
         return self
         
     def transform(self, X, train = True):
-        """Add manager skill to a new matrix.
+        """
+        Creating new features
         
         Parameters
         ----------
-        X : pandas dataframe, shape [n_samples, n_features]
-            Input data, has to contain "interest_level".
+        X: dataset
+        train: if True, the outcome variable is note encoded
         """        
         X['photo_cnt'] = X['photos'].apply(len)
         X['created'] = pd.to_datetime(X['created'])
@@ -198,18 +218,34 @@ class Preprocessor(BaseEstimator, TransformerMixin):
         X['hour'] = X['created'].dt.hour
         X['minute'] = X['created'].dt.minute
         X['feature_cnt'] = X['features'].apply(len)
-        X['price/bed'] = X['price']/(X['bedrooms'].apply(lambda x: 1 if x ==0 else x))
+        
+        X['price/bed'] = X['price']/(X['bedrooms']
+            .apply(lambda x: 1 if x ==0 else x))
         X['price/bath'] = X['price']/X['bathrooms']
         X['price/room'] = X['price']/(X['bedrooms']+X['bathrooms'])
         X['totalrooms'] = X['bedrooms']+X['bathrooms']
-        X['num_description_words'] = X['description'].apply(lambda x: len(x.split(" ")))
+        X['half_bath'] = (X['bathrooms']
+            .apply(lambda x: np.ceil(x)-np.floor(x)))
         
+        X['num_description_words'] = (X['description']
+            .apply(lambda x: len(x.split(" "))))
+        
+        X['display_address'] = (X['display_address']
+            .apply(lambda x: x.lower().strip()))
+        X['street_address'] = (X['street_address']
+            .apply(lambda x: x.lower().strip()))
+        
+        
+        # Transform features with a single instance
+        for i in self.categorical_features.keys():
+            X.loc[X[i].isin(self.categorical_features[i].ravel()), i] = "-1"
+
         
         if train:
             X['interest_level'] = X['interest_level'].apply(self._parseInterest)
             X['interest_1'] = X['interest_level']
             X['interest_2'] = X['interest_level']        
-            X.loc[df['interest_level']==2,'interest_1'] = 1
-            X.loc[df['interest_level']==2,'interest_2'] = 0
+            X.loc[X['interest_level']==2,'interest_1'] = 1
+            X.loc[X['interest_level']==2,'interest_2'] = 0
         
         return X
