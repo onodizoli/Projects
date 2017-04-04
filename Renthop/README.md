@@ -1,4 +1,4 @@
-#Kaggle Renthop Rental Listing Competition
+# Kaggle Renthop Rental Listing Competition
 
 The objective of this competition is to assign interest level to apartment listings. A dataset of around 50.000 listings are provided.
 
